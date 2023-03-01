@@ -71,7 +71,7 @@ function Get-WUGToken {
 
         $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-        Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+        Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
     }
 
     [System.Net.ServicePointManager]::CertificatePolicy = $currentPolicy
