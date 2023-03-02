@@ -121,8 +121,8 @@ function Get-DeviceIDByName {
             $reader.DiscardBufferedData()
     
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-    
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -200,7 +200,7 @@ function Get-DeviceGroups {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -268,7 +268,7 @@ function Get-DeviceGroupsSummary {
 
                 $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-                Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+                Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
             }
         }
     }
@@ -329,7 +329,7 @@ function Add-DeviceGroup {
 
             $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $requestBody
 
-            Invoke-DebugIt -Message 'INFO' -Value ('Successfully added group {0}' -f $GroupName) -Console -Force
+            Write-Host -Object ('[INFO] Successfully added group {0}' -f $GroupName) -ForegroundColor 'Red'
         }
         catch {
 
@@ -343,7 +343,7 @@ function Add-DeviceGroup {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -395,7 +395,7 @@ function Update-DeviceProperties {
 
             if ($response.data."success" -eq $true) {
 
-                Invoke-DebugIt -Message 'INFO' -Value ('Successfully updated device {0}' -f $DisplayName) -Console -Force
+                Write-Host -Object ('[INFO] Successfully updated device {0}' -f $DisplayName) -ForegroundColor 'Red'
             }
         }
         catch {
@@ -410,7 +410,7 @@ function Update-DeviceProperties {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -505,7 +505,7 @@ function Add-MonitoredDevice {
     
                 $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
     
-                Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+                Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
             }
         }
     }
