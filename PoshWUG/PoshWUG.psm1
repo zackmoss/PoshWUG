@@ -73,7 +73,7 @@ function Get-WUGToken {
 
         $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-        Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
+        Write-Log -Message $($responseBody.error) -Severty Error -Console
     }
 
     [System.Net.ServicePointManager]::CertificatePolicy = $currentPolicy
@@ -85,7 +85,60 @@ function Get-WUGToken {
 #region Helper Functions
 
 
+function Write-Log {
 
+    [CmdletBinding()]
+    param (
+
+        [Parameter(Mandatory)]
+        [string] $Message,
+
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [ValidateSet('Info', 'Warn', 'Error')]
+        [string] $Severty = 'Info',
+
+        [switch] $Console,
+
+        [switch] $LogToFile
+    )
+
+    $logTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+
+    $logObject = [PSCustomObject]@{
+
+        Time    = $logTimestamp
+        Severty = $Severty
+        Message = $Message
+    }
+
+    if ($LogToFile) {
+
+        $logObject | Export-Csv -Path ('{0}\{1}_PSLog.csv' -f $env:TEMP, (Get-Date -Format 'MMddyyy')) -NoTypeInformation -Encoding ASCII
+    }
+
+    if ($Console) {
+
+        switch ($Severty) {
+
+            Warn {
+
+                Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
+                Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Yellow
+            }
+            Error { 
+
+                Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
+                Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Red
+            }
+            Default { 
+
+                Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
+                Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Cyan
+            }
+        }
+    }
+}
 
 
 #endregion
