@@ -121,8 +121,8 @@ function Get-DeviceIDByName {
             $reader.DiscardBufferedData()
     
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-    
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -200,7 +200,7 @@ function Get-DeviceGroups {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -268,7 +268,7 @@ function Get-DeviceGroupsSummary {
 
                 $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-                Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+                Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
             }
         }
     }
@@ -343,7 +343,7 @@ function Add-DeviceGroup {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -410,7 +410,7 @@ function Update-DeviceProperties {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
         }
     }
 }
@@ -505,7 +505,7 @@ function Add-MonitoredDevice {
     
                 $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
     
-                Invoke-DebugIt -Message 'ERROR' -Value $($responseBody.error) -Color 'Red' -Console -Force
+                Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
             }
         }
     }
