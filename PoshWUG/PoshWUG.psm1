@@ -156,6 +156,8 @@ function Get-DeviceIDByName {
         [Parameter(Mandatory)]
         [pscredential] $Credential,
 
+        [switch] $NoTLS,
+
         [string] $GroupID = '0',
 
         [string] $DeviceName
@@ -163,7 +165,15 @@ function Get-DeviceIDByName {
 
     begin {
 
-        $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+
     }
 
     process {
