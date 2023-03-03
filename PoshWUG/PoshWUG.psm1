@@ -73,7 +73,7 @@ function Get-WUGToken {
 
         $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-        Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
+        Write-Log -Message $($responseBody.error) -Severty Error -Console
     }
 
     [System.Net.ServicePointManager]::CertificatePolicy = $currentPolicy
@@ -85,7 +85,60 @@ function Get-WUGToken {
 #region Helper Functions
 
 
+function Write-Log {
 
+    [CmdletBinding()]
+    param (
+
+        [Parameter(Mandatory)]
+        [string] $Message,
+
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [ValidateSet('Info', 'Warn', 'Error')]
+        [string] $Severty = 'Info',
+
+        [switch] $Console,
+
+        [switch] $LogToFile
+    )
+
+    $logTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+
+    $logObject = [PSCustomObject]@{
+
+        Time    = $logTimestamp
+        Severty = $Severty
+        Message = $Message
+    }
+
+    if ($LogToFile) {
+
+        $logObject | Export-Csv -Path ('{0}\{1}_PSLog.csv' -f $env:TEMP, (Get-Date -Format 'MMddyyy')) -NoTypeInformation -Encoding ASCII
+    }
+
+    if ($Console) {
+
+        switch ($Severty) {
+
+            Warn {
+
+                Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
+                Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Yellow
+            }
+            Error { 
+
+                Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
+                Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Red
+            }
+            Default { 
+
+                Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
+                Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Cyan
+            }
+        }
+    }
+}
 
 
 #endregion
@@ -103,6 +156,8 @@ function Get-DeviceIDByName {
         [Parameter(Mandatory)]
         [pscredential] $Credential,
 
+        [switch] $NoTLS,
+
         [string] $GroupID = '0',
 
         [string] $DeviceName
@@ -110,7 +165,15 @@ function Get-DeviceIDByName {
 
     begin {
 
-        $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+
     }
 
     process {
@@ -138,7 +201,7 @@ function Get-DeviceIDByName {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
+            Write-Log -Message $($responseBody.error) -Severty Error -Console
         }
     }
 }
@@ -153,6 +216,8 @@ function Add-MonitoredDevice {
         [Parameter(Mandatory)]
         [pscredential] $Credential,
 
+        [switch] $NoTLS,
+
         [string] $GroupID = '0',
 
         [Parameter(Mandatory)]
@@ -165,7 +230,14 @@ function Add-MonitoredDevice {
 
     begin {
 
-        $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
     }
 
     process {
@@ -205,18 +277,18 @@ function Add-MonitoredDevice {
 
                 if ($response.data."success" -eq $true) {
 
-                    Write-Host -Object ('[INFO] Successfully added device {0}' -f $device) -ForegroundColor 'Cyan'
+                    Write-Log -Message ('[INFO] Successfully added device {0}' -f $device) -Severty Info -Console
 
                     $deviceId = Get-DeviceIDByName -WUGServer $WUGServer -Credential $Credential -GroupID $GroupID -DeviceName $device
 
-                    Write-Host -Object '[INFO] Waiting for device to be created to obtain device ID' -ForegroundColor 'Cyan'
+                    Write-Log -Message '[INFO] Waiting for device to be created to obtain device ID' -Severty Info -Console
 
                     while ($deviceId.Length -le 0) {
 
                         $deviceId = Get-DeviceIDByName -WUGServer $WUGServer -Credential $Credential -GroupID $GroupID -DeviceName $device
                     }
 
-                    Write-Host -Object ('[INFO] New device ID {0}' -f $deviceId) -ForegroundColor 'Cyan'
+                    Write-Log -Message ('[INFO] New device ID {0}' -f $deviceId) -Severty Info -Console
 
                     Update-DeviceProperties -WUGServer $WUGServer -Credential $Credential -DeviceID $deviceId -DisplayName $DisplayName
                 }
@@ -233,7 +305,7 @@ function Add-MonitoredDevice {
 
                 $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-                Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
+                Write-Log -Message $($responseBody.error) -Severty Error -Console
             }
         }
     }
@@ -249,6 +321,8 @@ function Update-DeviceProperty {
         [Parameter(Mandatory)]
         [pscredential] $Credential,
 
+        [switch] $NoTLS,
+
         [Parameter(Mandatory)]
         [string] $DeviceID,
 
@@ -259,7 +333,14 @@ function Update-DeviceProperty {
 
     begin {
 
-        $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
     }
 
     process {
@@ -286,7 +367,7 @@ function Update-DeviceProperty {
 
             if ($response.data."success" -eq $true) {
 
-                Write-Host -Object ('[INFO] Successfully updated device {0}' -f $DisplayName) -ForegroundColor 'Cyan'
+                Write-Log -Message ('[INFO] Successfully updated device {0}' -f $DisplayName) -Severty Info -Console
             }
         }
         catch {
@@ -301,11 +382,398 @@ function Update-DeviceProperty {
 
             $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
 
-            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
+            Write-Log -Message $($responseBody.error) -Severty Error -Console
         }
     }
 }
 
+
+#endregion
+
+#region Device Group Functions
+
+
+function Get-DeviceGroupsSummary {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [ipaddress] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [switch] $NoTLS
+    )
+
+    begin {
+
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+    }
+
+    process {
+
+        $deviceGroups = Get-DeviceGroups -WUGServer $WUGServer -Credential $Credential
+
+        foreach ($group in $deviceGroups) {
+
+            $uri = '{0}:9644/api/v1/device-groups/{1}/status' -f $Script:urlVar, $group.id
+
+            try {
+
+                $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+                $headers.Add("Content-Type", "application/json")
+                $headers.Add("Authorization", "Bearer $authToken")
+                $headers.Add("Accept", "application/json")
+
+                $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+
+                [PSCustomObject]@{
+
+                    GroupName          = $group.name
+                    UpDevices          = $response.data.stateSummaries.deviceCount[0]
+                    DownDevices        = $response.data.stateSummaries.deviceCount[1]
+                    MaintenanceDevices = $response.data.stateSummaries.deviceCount[2]
+                    UnknownDevices     = $response.data.stateSummaries.deviceCount[3]
+                }
+            }
+            catch {
+
+                $result = $_.Exception.Response.GetResponseStream()
+
+                $reader = New-Object System.IO.StreamReader($result)
+
+                $reader.BaseStream.Position = 0
+
+                $reader.DiscardBufferedData()
+
+                $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
+
+                Write-Log -Message $($responseBody.error) -Severty Error -Console
+            }
+        }
+    }
+}
+
+function Get-DeviceGroup {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [ipaddress] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [switch] $NoTLS,
+
+        [string] $FindGroup,
+
+        [ValidateSet('static', 'dynamic', 'layer2')]
+        [string] $GroupType
+    )
+
+    begin {
+
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+    }
+
+    process {
+
+        if ($FindGroup) {
+
+            $uri = '{0}:9644/api/v1/device-groups/-?search={1}' -f $Script:urlVar, $FindGroup
+        }
+        else {
+
+            switch ($GroupType) {
+
+                'static' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=static_group' -f $Script:urlVar }
+
+                'dynamic' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=dynamic_group' -f $Script:urlVar }
+
+                'static' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=layer2' -f $Script:urlVar }
+
+                Default { $uri = '{0}:9644/api/v1/device-groups/-' -f $Script:urlVar }
+            }
+        }
+
+        try {
+
+            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+            $headers.Add("Content-Type", "application/json")
+            $headers.Add("Authorization", "Bearer $authToken")
+            $headers.Add("Accept", "application/json")
+
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+
+            $response.data.groups
+        }
+        catch {
+
+            $result = $_.Exception.Response.GetResponseStream()
+
+            $reader = New-Object System.IO.StreamReader($result)
+
+            $reader.BaseStream.Position = 0
+
+            $reader.DiscardBufferedData()
+
+            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
+
+            Write-Log -Message $($responseBody.error) -Severty Error -Console
+        }
+    }
+}
+
+function Add-DeviceGroup {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [ipaddress] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [switch] $NoTLS,
+
+        [Parameter(Mandatory)]
+        [string] $ParentGroupID,
+
+        [Parameter(Mandatory)]
+        [string] $GroupName,
+
+        [string] $GroupDescription
+    )
+
+    begin {
+
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/device-groups/{1}/child' -f $Script:urlVar, $ParentGroupID
+
+        $requestBody = @(
+            @{
+                name        = $GroupName
+                description = $GroupDescription
+            }
+        )
+
+        $requestBody = $requestBody | ConvertTo-Json
+
+        try {
+
+            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+            $headers.Add("Content-Type", "application/json")
+            $headers.Add("Authorization", "Bearer $authToken")
+            $headers.Add("Accept", "application/json")
+
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $requestBody
+
+            Write-Log -Message ('[INFO] Successfully added group {0}' -f $GroupName) -Severty Info -Console
+        }
+        catch {
+
+            $result = $_.Exception.Response.GetResponseStream()
+
+            $reader = New-Object System.IO.StreamReader($result)
+
+            $reader.BaseStream.Position = 0
+
+            $reader.DiscardBufferedData()
+
+            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
+
+            Write-Log -Message $($responseBody.error) -Severty Error -Console
+        }
+    }
+}
+
+
+#endregion
+
+#region Monitor Functions
+
+
+function Get-Monitor {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [ipaddress] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [switch] $NoTLS
+    )
+
+    begin {
+
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/monitors/-' -f $Script:urlVar
+
+        try {
+
+            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+            $headers.Add("Content-Type", "application/json")
+            $headers.Add("Authorization", "Bearer $authToken")
+            $headers.Add("Accept", "application/json")
+
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+
+            $response
+        }
+        catch {
+
+            $result = $_.Exception.Response.GetResponseStream()
+
+            $reader = New-Object System.IO.StreamReader($result)
+
+            $reader.BaseStream.Position = 0
+
+            $reader.DiscardBufferedData()
+
+            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
+
+            Write-Log -Message $($responseBody.error) -Severty Error -Console
+        }
+    }
+}
+
+function Add-Monitor {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [ipaddress] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [switch] $NoTLS,
+
+        [ValidateSet('active', 'performance', 'passive')]
+        [string] $MonitorType,
+
+        [Parameter(Mandatory)]
+        [string] $MonitorName,
+
+        [Parameter(Mandatory)]
+        [string] $MonitorDescription
+    )
+
+    begin {
+
+        if ($NoTLS) {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
+        }
+        else {
+
+            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/monitors/-' -f $Script:urlVar
+
+        $requestBody = @(
+            @{
+                name            = $MonitorName
+                description     = $MonitorDescription
+                monitorTypeInfo = @{
+                    baseType = $MonitorType
+                    classId  = '92c56b83-d6a7-43a4-a094-8fe5f8fa4b2c'
+                }
+                propertyBags    = @(
+                    @{
+                        name  = 'Test Name'
+                        value = 'Test Value'
+                    }
+                )
+
+            }
+        )
+
+        $requestBody = $requestBody | ConvertTo-Json
+
+        try {
+
+            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+            $headers.Add("Content-Type", "application/json")
+            $headers.Add("Authorization", "Bearer $authToken")
+            $headers.Add("Accept", "application/json")
+
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $requestBody
+
+            if ($response.data.update."success" -eq $true) {
+
+                Write-Log -Message ('[INFO] Successfully added monitor {0}' -f $MonitorName) -Severty Info -Console
+            }
+        }
+        catch {
+
+            $result = $_.Exception.Response.GetResponseStream()
+
+            $reader = New-Object System.IO.StreamReader($result)
+
+            $reader.BaseStream.Position = 0
+
+            $reader.DiscardBufferedData()
+
+            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
+
+            Write-Log -Message $($responseBody.error) -Severty Error -Console
+        }
+    }
+}
+
+
+#endregion
+
+#region Dev
+
+
+<# TODO Fix Function for new auth token method
 function Enable-DeviceMaintMode {
 
     param(
@@ -315,6 +783,8 @@ function Enable-DeviceMaintMode {
 
         [Parameter(Mandatory)]
         [pscredential] $Credential,
+
+        [switch] $NoTLS,
 
         [bool] $Enable = $True,
 
@@ -397,377 +867,7 @@ function Enable-DeviceMaintMode {
         Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
     }
 }
-
-
-#endregion
-
-#region Device Group Functions
-
-
-function Get-DeviceGroupsSummary {
-
-    param(
-
-        [Parameter(Mandatory)]
-        [ipaddress] $WUGServer,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential,
-
-        [switch] $NoTLS
-    )
-
-    begin {
-
-        if ($NoTLS) {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
-        }
-        else {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
-        }
-    }
-
-    process {
-
-        $deviceGroups = Get-DeviceGroups -WUGServer $WUGServer -Credential $Credential
-
-        foreach ($group in $deviceGroups) {
-
-            $uri = '{0}:9644/api/v1/device-groups/{1}/status' -f $Script:urlVar, $group.id
-
-            try {
-
-                $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-                $headers.Add("Content-Type", "application/json")
-                $headers.Add("Authorization", "Bearer $authToken")
-                $headers.Add("Accept", "application/json")
-
-                $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
-
-                [PSCustomObject]@{
-
-                    GroupName          = $group.name
-                    UpDevices          = $response.data.stateSummaries.deviceCount[0]
-                    DownDevices        = $response.data.stateSummaries.deviceCount[1]
-                    MaintenanceDevices = $response.data.stateSummaries.deviceCount[2]
-                    UnknownDevices     = $response.data.stateSummaries.deviceCount[3]
-                }
-            }
-            catch {
-
-                $result = $_.Exception.Response.GetResponseStream()
-
-                $reader = New-Object System.IO.StreamReader($result)
-
-                $reader.BaseStream.Position = 0
-
-                $reader.DiscardBufferedData()
-
-                $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-
-                Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
-            }
-        }
-    }
-}
-
-function Get-DeviceGroup {
-
-    param(
-
-        [Parameter(Mandatory)]
-        [ipaddress] $WUGServer,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential,
-
-        [switch] $NoTLS,
-
-        [string] $FindGroup,
-
-        [ValidateSet('static', 'dynamic', 'layer2')]
-        [string] $GroupType
-    )
-
-    begin {
-
-        if ($NoTLS) {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
-        }
-        else {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
-        }
-    }
-
-    process {
-
-        if ($FindGroup) {
-
-            $uri = '{0}:9644/api/v1/device-groups/-?search={1}' -f $Script:urlVar, $FindGroup
-        }
-        else {
-
-            switch ($GroupType) {
-
-                'static' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=static_group' -f $Script:urlVar }
-
-                'dynamic' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=dynamic_group' -f $Script:urlVar }
-
-                'static' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=layer2' -f $Script:urlVar }
-
-                Default { $uri = '{0}:9644/api/v1/device-groups/-' -f $Script:urlVar }
-            }
-        }
-
-        try {
-
-            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-            $headers.Add("Content-Type", "application/json")
-            $headers.Add("Authorization", "Bearer $authToken")
-            $headers.Add("Accept", "application/json")
-
-            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
-
-            $response.data.groups
-        }
-        catch {
-
-            $result = $_.Exception.Response.GetResponseStream()
-
-            $reader = New-Object System.IO.StreamReader($result)
-
-            $reader.BaseStream.Position = 0
-
-            $reader.DiscardBufferedData()
-
-            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-
-            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
-        }
-    }
-}
-
-function Add-DeviceGroup {
-
-    param(
-
-        [Parameter(Mandatory)]
-        [ipaddress] $WUGServer,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential,
-
-        [switch] $NoTLS,
-
-        [Parameter(Mandatory)]
-        [string] $ParentGroupID,
-
-        [Parameter(Mandatory)]
-        [string] $GroupName,
-
-        [string] $GroupDescription
-    )
-
-    begin {
-
-        if ($NoTLS) {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
-        }
-        else {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
-        }
-    }
-
-    process {
-
-        $uri = '{0}:9644/api/v1/device-groups/{1}/child' -f $Script:urlVar, $ParentGroupID
-
-        $requestBody = @(
-            @{
-                name        = $GroupName
-                description = $GroupDescription
-            }
-        )
-
-        $requestBody = $requestBody | ConvertTo-Json
-
-        try {
-
-            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-            $headers.Add("Content-Type", "application/json")
-            $headers.Add("Authorization", "Bearer $authToken")
-            $headers.Add("Accept", "application/json")
-
-            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $requestBody
-
-            Write-Host -Object ('[INFO] Successfully added group {0}' -f $GroupName) -ForegroundColor 'Red'
-        }
-        catch {
-
-            $result = $_.Exception.Response.GetResponseStream()
-
-            $reader = New-Object System.IO.StreamReader($result)
-
-            $reader.BaseStream.Position = 0
-
-            $reader.DiscardBufferedData()
-
-            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-
-            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
-        }
-    }
-}
-
-
-#endregion
-
-#region Monitor Functions
-
-
-function Get-Monitor {
-
-    param(
-
-        [Parameter(Mandatory)]
-        [ipaddress] $WUGServer,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential
-    )
-
-    begin {
-
-        $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
-    }
-
-    process {
-
-        $uri = '{0}:9644/api/v1/monitors/-' -f $Script:urlVar
-
-        try {
-
-            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-            $headers.Add("Content-Type", "application/json")
-            $headers.Add("Authorization", "Bearer $authToken")
-            $headers.Add("Accept", "application/json")
-
-            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
-
-            $response
-        }
-        catch {
-
-            $result = $_.Exception.Response.GetResponseStream()
-
-            $reader = New-Object System.IO.StreamReader($result)
-
-            $reader.BaseStream.Position = 0
-
-            $reader.DiscardBufferedData()
-
-            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-
-            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
-        }
-    }
-}
-
-function Add-Monitor {
-
-    param(
-
-        [Parameter(Mandatory)]
-        [ipaddress] $WUGServer,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential,
-
-        [switch] $NoTLS,
-
-        [ValidateSet('active', 'performance', 'passive')]
-        [string] $MonitorType,
-
-        [Parameter(Mandatory)]
-        [string] $MonitorName,
-
-        [Parameter(Mandatory)]
-        [string] $MonitorDescription
-    )
-
-    begin {
-
-        if ($NoTLS) {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential -NoTLS
-        }
-        else {
-
-            $authToken = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
-        }
-
-    }
-
-    process {
-
-        $uri = '{0}:9644/api/v1/monitors/-' -f $Script:urlVar
-
-        $requestBody = @(
-            @{
-                name            = $MonitorName
-                description     = $MonitorDescription
-                monitorTypeInfo = @{
-                    baseType = $MonitorType
-                    classId  = '92c56b83-d6a7-43a4-a094-8fe5f8fa4b2c'
-                }
-                propertyBags    = @(
-                    @{
-                        name  = 'Test Name'
-                        value = 'Test Value'
-                    }
-                )
-
-            }
-        )
-
-        $requestBody = $requestBody | ConvertTo-Json
-
-        try {
-
-            $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-            $headers.Add("Content-Type", "application/json")
-            $headers.Add("Authorization", "Bearer $authToken")
-            $headers.Add("Accept", "application/json")
-
-            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $requestBody
-
-            if ($response.data.update."success" -eq $true) {
-
-                Write-Host -Object ('[INFO] Successfully added monitor {0}' -f $MonitorName) -ForegroundColor 'Cyan'
-            }
-        }
-        catch {
-
-            $result = $_.Exception.Response.GetResponseStream()
-
-            $reader = New-Object System.IO.StreamReader($result)
-
-            $reader.BaseStream.Position = 0
-
-            $reader.DiscardBufferedData()
-
-            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-
-            Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
-        }
-    }
-}
+#>
 
 
 #endregion
