@@ -13,6 +13,28 @@ function Get-WUGToken {
         [pscredential] $Credential
     )
 
+    $currentProtocol = [Net.ServicePointManager]::SecurityProtocol
+
+    if ($currentProtocol.ToString().Split(',').Trim() -notcontains 'Tls12') {
+
+        [Net.ServicePointManager]::SecurityProtocol += [Net.SecurityProtocolType]::Tls12
+    }
+
+    Add-Type -TypeDefinition @'
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+
+public class InSecureWebPolicy : ICertificatePolicy
+{
+    public bool CheckValidationResult(ServicePoint sPoint, X509Certificate cert,WebRequest wRequest, int certProb)
+    {
+        return true;
+    }
+}
+'@
+
+    [System.Net.ServicePointManager]::CertificatePolicy = New-Object -TypeName InSecureWebPolicy
+
     $Script:urlVar = 'https://{0}' -f $WUGServer
 
     $uri = '{0}:9644/api/v1/token' -f $Script:urlVar
@@ -48,7 +70,7 @@ function Get-WUGToken {
     }
 }
 
-function Request-WUGAuthToken {
+function Request-WUGRefreshToken {
 
     [CmdletBinding()]
     param(
@@ -88,8 +110,8 @@ function Request-WUGAuthToken {
 
         $wugTokenExpiry = (Get-Date).AddSeconds($newToken.expires_in)
 
-        $Global:wugConnection | Add-Member -MemberType NoteProperty -Name wugTokenExpiry -Value $wugTokenExpiry -Force
-        $Global:wugConnection | Add-Member -MemberType NoteProperty -Name wugRefreshToken -Value $wugRefreshToken -Force
+        $Script:wugConnection | Add-Member -MemberType NoteProperty -Name wugTokenExpiry -Value $wugTokenExpiry -Force
+        $Script:wugConnection | Add-Member -MemberType NoteProperty -Name wugRefreshToken -Value $wugRefreshToken -Force
     }
     else {
 
@@ -164,7 +186,7 @@ function Write-Log {
 #region Device Functions
 
 
-function Get-DeviceIDByName {
+function Get-WUGDevice {
 
     param (
 
@@ -195,37 +217,57 @@ function Get-DeviceIDByName {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
         }
-    }
-
-    process {
 
         if ($DeviceName) {
 
-            $uri = '{0}:9644/api/v1/device-groups/{1}/devices?search={2}' -f $Script:urlVar, $GroupID, $DeviceName
+            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-?search={2}&view=basic' -f $Script:urlVar, $GroupID, $DeviceName
         }
         else {
 
-            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-' -f $Script:urlVar, $GroupID
+            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-?view=basic' -f $Script:urlVar, $GroupID
         }
 
         try {
 
-            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
 
-            [string] $response.data.'devices'.'id'
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data.devices
         }
         catch {
 
             Write-Error $_
         }
     }
+
+    process {
+
+        while ($nextPageId) {
+
+            $uri += '&pageId={0}' -f $nextPageId
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data.devices
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
 }
 
-function Add-MonitoredDevice {
+function Get-WUGDeviceGroupAssignment {
 
-    param(
+    param (
 
         [Parameter(Mandatory)]
         [string] $WUGServer,
@@ -233,14 +275,9 @@ function Add-MonitoredDevice {
         [Parameter(Mandatory)]
         [pscredential] $Credential,
 
-        [string] $GroupID = '0',
+        [string] $DeviceID,
 
-        [Parameter(Mandatory)]
-        [string[]] $DeviceIPAddress,
-
-        [switch] $ForceAdd,
-
-        [string] $DisplayName
+        [string] $GroupName
     )
 
     begin {
@@ -259,7 +296,233 @@ function Add-MonitoredDevice {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
+        }
+
+        if ($DeviceName) {
+
+            $uri = '{0}:9644/api/v1/devices/{1}/group/-?search={2}&type=static_group' -f $Script:urlVar, $DeviceID, $DeviceName
+        }
+        else {
+
+            $uri = '{0}:9644/api/v1/devices/{1}/group/-?type=static_group' -f $Script:urlVar, $DeviceID
+        }
+
+        try {
+
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data
+        }
+        catch {
+
+            Write-Error $_
+        }
+    }
+
+    process {
+
+        while ($nextPageId) {
+
+            $uri += '&pageId={0}' -f $nextPageId
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
+}
+
+function Get-WUGDeviceAttribute {
+
+    param (
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [string] $DeviceID,
+
+        [string] $AttributeName
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+
+        $uri = '{0}:9644/api/v1/devices/{1}/attributes/-?names={2}' -f $Script:urlVar, $DeviceID, $AttributeName
+
+        try {
+
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data
+        }
+        catch {
+
+            Write-Error $_
+        }
+    }
+
+    process {
+
+        while ($nextPageId) {
+
+            $uri += '&pageId={0}' -f $nextPageId
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
+}
+
+function Add-WUGActiveMonitorToDevice {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [Parameter(Mandatory)]
+        [string] $DeviceID,
+
+        [Parameter(Mandatory)]
+        [string] $ActiveMonitorID
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/devices/{1}/monitors/-' -f $Script:urlVar, $DeviceID
+
+        $requestBody = @(
+            @{
+                type          = 'active'
+                monitorTypeId = $ActiveMonitorID
+                enabled       = $true
+            }
+        )
+
+        $requestBody = $requestBody | ConvertTo-Json
+
+        try {
+
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $Script:wugHeaders -Body $requestBody
+
+            if ($response.data."successful" -eq 1) {
+
+                Write-Log -Message '[INFO] Successfully added monitor to device' -Severty Info -Console
+            }
+        }
+        catch {
+
+            Write-Error $_
+        }
+        
+    }
+}
+
+function Add-WUGMonitoredDevice {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [string] $GroupID = '0',
+
+        [Parameter(Mandatory)]
+        [string[]] $DeviceIPAddress,
+
+        [switch] $ForceAdd,
+
+        [string] $DisplayName,
+
+        [string] $Role
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
         }
     }
 
@@ -273,8 +536,7 @@ function Add-MonitoredDevice {
 
                 $requestBody = @(
                     @{
-                        forceAdd          = $true
-                        useAllCredentials = $true
+                        forceAdd = $true
                     }
                 )
             }
@@ -297,18 +559,26 @@ function Add-MonitoredDevice {
 
                     Write-Log -Message ('[INFO] Successfully added device {0}' -f $device) -Severty Info -Console
 
-                    $deviceId = Get-DeviceIDByName -WUGServer $WUGServer -Credential $Credential -GroupID $GroupID -DeviceName $device
+                    $deviceId = Get-WUGDevice -WUGServer $WUGServer -Credential $Credential -GroupID $GroupID -DeviceName $device | Where-Object {
+
+                        $_.networkAddress -eq $device
+                    } | Select-Object -ExpandProperty id
 
                     Write-Log -Message '[INFO] Waiting for device to be created to obtain device ID' -Severty Info -Console
 
                     while ($deviceId.Length -le 0) {
 
-                        $deviceId = Get-DeviceIDByName -WUGServer $WUGServer -Credential $Credential -GroupID $GroupID -DeviceName $device
+                        Start-Sleep -Seconds 10
+
+                        $deviceId = Get-WUGDevice -WUGServer $WUGServer -Credential $Credential -GroupID $GroupID -DeviceName $device | Where-Object {
+
+                            $_.networkAddress -eq $device
+                        } | Select-Object -ExpandProperty id
                     }
 
                     Write-Log -Message ('[INFO] New device ID {0}' -f $deviceId) -Severty Info -Console
 
-                    Update-DeviceProperty -WUGServer $WUGServer -Credential $Credential -DeviceID $deviceId -DisplayName $DisplayName
+                    Update-WUGDeviceProperty -WUGServer $WUGServer -Credential $Credential -DeviceID $deviceId -DisplayName $DisplayName
                 }
             }
             catch {
@@ -319,7 +589,7 @@ function Add-MonitoredDevice {
     }
 }
 
-function Update-DeviceProperty {
+function Update-WUGDeviceProperty {
 
     param(
 
@@ -334,7 +604,9 @@ function Update-DeviceProperty {
 
         [string] $DisplayName,
 
-        [string] $Notes
+        [string] $Notes,
+
+        [string] $Role
     )
 
     begin {
@@ -353,13 +625,22 @@ function Update-DeviceProperty {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
         }
     }
 
     process {
 
-        $uri = '{0}:9644/api/v1/devices/{1}/properties' -f $Script:urlVar, $DeviceID
+        if ($Role) {
+
+            $roleID = Get-WUGDeviceRole -WUGServer $WUGServer -Credential $Credential -Search $Role | Select-Object -ExpandProperty id
+
+            $uri = '{0}:9644/api/v1/devices/{1}/roles/-?roleId={2}' -f $Script:urlVar, $DeviceID, $roleID
+        }
+        else {
+
+            $uri = '{0}:9644/api/v1/devices/{1}/properties' -f $Script:urlVar, $DeviceID
+        }
 
         $requestBody = @(
             @{
@@ -386,13 +667,68 @@ function Update-DeviceProperty {
     }
 }
 
+function Get-WUGDeviceRole {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [string] $Search
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/device-role/-' -f $Script:urlVar
+
+        if ($Search) {
+
+            $uri += '?search={0}' -f $Search
+        }
+
+        try {
+
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $response.data
+        }
+        catch {
+
+            Write-Error $_
+        }
+    }
+}
+
 
 #endregion
 
 #region Device Group Functions
 
 
-function Add-DeviceGroup {
+function Add-WUGDeviceGroup {
 
     param(
 
@@ -427,7 +763,7 @@ function Add-DeviceGroup {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
         }
     }
 
@@ -457,7 +793,97 @@ function Add-DeviceGroup {
     }
 }
 
-function Get-DeviceGroupsSummary {
+function Invoke-WUGDeviceMaintenanceMode {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [switch] $Enable,
+
+        [int] $EnabledHours = 0,
+
+        [string] $DeviceName,
+
+        [string] $ReasonComment
+    )
+
+    if (!$Script:wugHeaders) {
+
+        Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+        Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+    }
+    elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+        Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+        Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+    }
+    else {
+
+        Request-WUGRefreshToken
+    }
+
+    if ($EnabledHours -gt 0) {
+
+        $dateTimeUTC = Get-Date ([datetime]::UtcNow)
+        $addedDateTime = $dateTimeUTC.AddHours($EnabledHours)
+        $endTimeUTC = $addedDateTime.ToString("O")
+    }
+
+    $deviceID = Get-DeviceIDByName -DeviceName $DeviceName -WUGServer $WUGServer -Credential $Credential
+
+    $uri = '{0}:9644/api/v1/devices/{1}/config/maintenance' -f $Script:urlVar, $deviceID
+
+    if ($Enable) {
+
+        $requestBody = @(
+            @{
+                enabled = $true
+                endUtc  = $endTimeUTC
+                reason  = $ReasonComment
+            }
+        )
+    }
+    else {
+
+        $requestBody = @(
+            @{
+                enabled = $false
+            }
+        )
+    }
+
+    $requestBody = $requestBody | ConvertTo-Json
+
+    try {
+
+        $response = Invoke-RestMethod -Method Put -Uri $uri -Headers $Script:wugHeaders -Body $requestBody
+
+        if ($response.data."success" -eq $true) {
+
+            if (!$Enable) {
+
+                Write-Host -Object ('[INFO] Successfully disabled maintenance mode on {0}' -f $DeviceName) -ForegroundColor 'Cyan'
+            }
+            else {
+
+                Write-Host -Object ('[INFO] Successfully enabled maintenance mode on {0}' -f $DeviceName) -ForegroundColor 'Cyan'
+            }
+        }
+    }
+    catch {
+
+        Write-Error $_
+    }
+}
+
+function Get-WUGDeviceGroupsSummary {
 
     param(
 
@@ -486,13 +912,13 @@ function Get-DeviceGroupsSummary {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
         }
     }
 
     process {
 
-        $deviceGroups = Get-DeviceGroup -WUGServer $WUGServer -Credential $Credential -Search $Search
+        $deviceGroups = Get-WUGDeviceGroup -WUGServer $WUGServer -Credential $Credential -Search $Search
 
         foreach ($group in $deviceGroups) {
 
@@ -519,7 +945,7 @@ function Get-DeviceGroupsSummary {
     }
 }
 
-function Get-DeviceGroup {
+function Get-WUGDeviceGroup {
 
     param(
 
@@ -551,44 +977,80 @@ function Get-DeviceGroup {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
         }
-    }
 
-    process {
+        switch ($GroupType) {
+
+            'static' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=static_group' -f $Script:urlVar }
+
+            'dynamic' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=dynamic_group' -f $Script:urlVar }
+
+            'layer2' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=layer2' -f $Script:urlVar }
+
+            Default { $uri = '{0}:9644/api/v1/device-groups/-' -f $Script:urlVar }
+        }
 
         if ($Search) {
 
-            $uri = '{0}:9644/api/v1/device-groups/-?search={1}' -f $Script:urlVar, $Search
-        }
-        else {
+            if ($GroupType) {
 
-            switch ($GroupType) {
+                $uri += '&search={0}' -f $Search
+            }
+            else {
 
-                'static' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=static_group' -f $Script:urlVar }
-
-                'dynamic' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=dynamic_group' -f $Script:urlVar }
-
-                'layer2' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=layer2' -f $Script:urlVar }
-
-                Default { $uri = '{0}:9644/api/v1/device-groups/-' -f $Script:urlVar }
+                $uri += '?search={0}' -f $Search
             }
         }
 
         try {
 
-            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
 
-            $response.data.groups
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data.groups
         }
         catch {
 
             Write-Error $_
         }
     }
+
+    process {
+
+        while ($nextPageId) {
+
+            if ($GroupType) {
+
+                $uri += '&pageId={0}' -f $nextPageId
+            }
+            elseif ($Search) {
+
+                $uri += '&pageId={0}' -f $nextPageId
+            }
+            else {
+
+                $uri += '?pageId={0}' -f $nextPageId
+            }
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data.groups
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
 }
 
-function Invoke-DeviceGroupRefresh {
+function Invoke-WUGDeviceGroupRefresh {
 
     [CmdletBinding()]
     param(
@@ -621,7 +1083,7 @@ function Invoke-DeviceGroupRefresh {
         }
         else {
 
-            Request-WUGAuthToken
+            Request-WUGRefreshToken
         }
 
         $updateNamesActiveMonitor = 'updateNamesForInterfaceActiveMonitor=true'
@@ -664,7 +1126,7 @@ function Invoke-DeviceGroupRefresh {
 #region Monitor Functions
 
 
-function Get-Monitor {
+function Add-WUGMonitor {
 
     param(
 
@@ -672,17 +1134,40 @@ function Get-Monitor {
         [string] $WUGServer,
 
         [Parameter(Mandatory)]
-        [pscredential] $Credential
+        [pscredential] $Credential,
+
+        [ValidateSet('active', 'performance', 'passive')]
+        [string] $MonitorType,
+
+        [Parameter(Mandatory)]
+        [string] $MonitorName,
+
+        [Parameter(Mandatory)]
+        [string] $MonitorDescription,
+
+        [Parameter(Mandatory)]
+        [string] $ClassID,
+
+        [switch] $UseSNMP
     )
 
     begin {
 
-        $token = Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        if (!$Script:wugHeaders) {
 
-        $headers = @{
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
 
-            "Content-Type"  = "application/json"
-            "Authorization" = 'bearer {0}' -f $token.access_token
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
         }
     }
 
@@ -690,25 +1175,139 @@ function Get-Monitor {
 
         $uri = '{0}:9644/api/v1/monitors/-' -f $Script:urlVar
 
+        if ($UseSNMP) {
+
+            $snmp = '1'
+        }
+        else {
+
+            $snmp = '0'
+        }
+
+        $requestBody = @(
+            @{
+                useInDiscovery  = $true
+                name            = $MonitorName
+                description     = $MonitorDescription
+                monitorTypeInfo = @{
+                    baseType = $MonitorType
+                    classId  = $ClassID
+                }
+                propertyBags    = @(
+                    @{
+                        name  = 'NTSERVICE:ServiceDisplayName'
+                        value = $ServiceDisplayName
+                    }
+                    @{
+                        name  = 'NTSERVICE:ServiceInternalName'
+                        value = ('Win32_Service.Name="{0}"' -f $ServiceInternalName)
+                    }
+                    @{
+                        name  = 'NTSERVICE:RestartOnFailure'
+                        value = '1'
+                    }
+                    @{
+                        name  = 'NTSERVICE:SNMPRetries'
+                        value = '1'
+                    }
+                    @{
+                        name  = 'NTSERVICE:SNMPTimeout'
+                        value = '3'
+                    }
+                    @{
+                        name  = 'NTSERVICE:UseSNMP'
+                        value = $snmp
+                    }
+                )
+            }
+        )
+
+        $requestBody = $requestBody | ConvertTo-Json
+
         try {
 
-            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $Script:wugHeaders -Body $requestBody
 
             $response
         }
         catch {
 
-            $result = $_.Exception.Response.GetResponseStream()
+            Write-Error $_
+        }
+    }
 
-            $reader = New-Object System.IO.StreamReader($result)
+    end {
 
-            $reader.BaseStream.Position = 0
+    }
 
-            $reader.DiscardBufferedData()
+}
 
-            $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
+function Get-WUGMonitor {
 
-            Write-Log -Message $($responseBody.error) -Severty Error -Console
+    param(
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [string] $Search,
+
+        [ValidateSet('active', 'passive', 'performance')]
+        [string] $MonitorType = 'active'
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/monitors/-?includeCoreMonitors=true' -f $Script:urlVar
+
+        if ($Search) {
+
+            $uri += '&search={0}' -f $Search
+        }
+
+        switch ($MonitorType) {
+
+            active { $uri += '&type={0}' -f $MonitorType }
+            passive { $uri += '&type={0}' -f $MonitorType }
+            performance { $uri += '&type={0}' -f $MonitorType }
+        }
+
+        try {
+
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            switch ($MonitorType) {
+
+                active { $response.data.activeMonitors }
+                passive { $response.data.passiveMonitors }
+                performance { $response.data.performanceMonitors }
+            }
+        }
+        catch {
+
+            Write-Error $_
         }
     }
 }
@@ -716,104 +1315,71 @@ function Get-Monitor {
 
 #endregion
 
-#region Dev
+#region Reporting
 
 
-<# TODO Fix Function for new auth token method
-function Enable-DeviceMaintMode {
+function Get-WUGDeviceGroupUptime {
 
     param(
 
         [Parameter(Mandatory)]
-        [ipaddress] $WUGServer,
+        [string] $WUGServer,
 
         [Parameter(Mandatory)]
         [pscredential] $Credential,
 
-        [switch] $NoTLS,
+        [Parameter(Mandatory)]
+        [string] $GroupID,
 
-        [bool] $Enable = $True,
+        [string] $BusinessHoursID,
 
-        [int] $EnabledHours = 0,
-
-        [string] $DeviceName,
-
-        [string] $ReasonComment
+        [Parameter()]
+        [ValidateSet('today', 'lastPolled', 'yesterday', 'lastMonth', 'lastQuarter', 'weekToDate', 'monthToDate', 'quarterToDate')]
+        [string] $ReportRange = 'today'
     )
 
-    if ($EnabledHours -gt 0) {
+    begin {
 
-        $dateTimeUTC = Get-Date ([datetime]::UtcNow)
-        $addedDateTime = $dateTimeUTC.AddHours($EnabledHours)
-        $endTimeUTC = $addedDateTime.ToString("O")
+        if (!$Script:wugHeaders) {
+
+            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
     }
 
-    $deviceID = Get-DeviceIDByName -DeviceName $DeviceName -WUGServer $WUGServer -Credential $Credential
+    process {
 
-    $uri = 'http://{0}:9644/api/v1/devices/{1}/config/maintenance' -f $WUGServer, $deviceID
+        $uri = '{0}:9644/api/v1/device-groups/{1}/devices/reports/ping-availability?returnHierarchy=false' -f $Script:urlVar, $GroupID
 
-    if ($Enable -eq $true) {
+        switch ($PSBoundParameters.Keys) {
 
-        $requestBody = @(
-            @{
-                enabled = $true
-                endUtc  = $endTimeUTC
-                reason  = $ReasonComment
-            }
-        )
-    }
-    else {
-
-        $requestBody = @(
-            @{
-                enabled = $false
-            }
-        )
-    }
-
-    $requestBody = $requestBody | ConvertTo-Json
-
-    try {
-
-        $authToken = Get-WUGToken -ServerIPAddress $WUGServer -Credential $Credential
-
-        $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-        $headers.Add("Content-Type", "application/json")
-        $headers.Add("Authorization", "Bearer $authToken")
-        $headers.Add("Accept", "application/json")
-
-        $response = Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $requestBody
-
-        if ($response.data."success" -eq $true) {
-
-            if (!$Enable) {
-
-                Write-Host -Object ('[INFO] Successfully disabled maintenance mode on {0}' -f $DeviceName) -ForegroundColor 'Cyan'
-            }
-            else {
-
-                Write-Host -Object ('[INFO] Successfully enabled maintenance mode on {0}' -f $DeviceName) -ForegroundColor 'Cyan'
-            }
+            'BusinessHoursID' { $uri += '&businessHoursId={0}' -f $BusinessHoursID }
+            'ReportRange' { $uri += '&range={0}' -f $ReportRange }
         }
 
+        try {
 
-    }
-    catch {
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
 
-        $result = $_.Exception.Response.GetResponseStream()
+            $response.data
+        }
+        catch {
 
-        $reader = New-Object System.IO.StreamReader($result)
-
-        $reader.BaseStream.Position = 0
-
-        $reader.DiscardBufferedData()
-
-        $responseBody = $reader.ReadToEnd() | ConvertFrom-Json
-
-        Write-Host -Object ('[ERROR] {0}' -f $responseBody.error) -ForegroundColor 'Red'
+            Write-Error $_
+        }
     }
 }
-#>
 
 
 #endregion
