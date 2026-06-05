@@ -20,21 +20,6 @@ function Get-WUGToken {
         [Net.ServicePointManager]::SecurityProtocol += [Net.SecurityProtocolType]::Tls12
     }
 
-    Add-Type -TypeDefinition @'
-using System.Net;
-using System.Security.Cryptography.X509Certificates;
-
-public class InSecureWebPolicy : ICertificatePolicy
-{
-    public bool CheckValidationResult(ServicePoint sPoint, X509Certificate cert,WebRequest wRequest, int certProb)
-    {
-        return true;
-    }
-}
-'@
-
-    [System.Net.ServicePointManager]::CertificatePolicy = New-Object -TypeName InSecureWebPolicy
-
     $Script:urlVar = 'https://{0}' -f $WUGServer
 
     $uri = '{0}:9644/api/v1/token' -f $Script:urlVar
@@ -80,6 +65,8 @@ function Request-WUGRefreshToken {
     )
 
     if ((Get-Date).AddMinutes($RefreshMinutes) -ge $Script:wugConnection.wugTokenExpiry) {
+
+        Write-Verbose -Message 'Requesting refresh token'
 
         $refreshTokenUri = '{0}:9644/api/v1/token' -f $Script:urlVar
 
@@ -171,7 +158,7 @@ function Write-Log {
                 Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
                 Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Red
             }
-            Default {
+            default {
 
                 Write-Host -Object ('{0} [{1}]' -f $logObject.Time, $logObject.Severty) -ForegroundColor Gray
                 Write-Host -Object ('{0}' -f $logObject.Message) -ForegroundColor Cyan
@@ -205,13 +192,13 @@ function Get-WUGDevice {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -226,7 +213,7 @@ function Get-WUGDevice {
         }
         else {
 
-            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-?view=basic' -f $Script:urlVar, $GroupID
+            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-?view=card' -f $Script:urlVar, $GroupID
         }
 
         try {
@@ -249,9 +236,80 @@ function Get-WUGDevice {
 
         while ($nextPageId) {
 
-            $uri += '&pageId={0}' -f $nextPageId
+            $nextPage = '&pageId={0}' -f $nextPageId
 
-            $continuedResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri ($uri + $nextPage) -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data.devices
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
+}
+
+function Get-WUGDeviceMonitorAssignment {
+
+    param (
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [Parameter(Mandatory)]
+        [string] $DeviceID
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+
+        $uri = '{0}:9644/api/v1/devices/{1}/monitors/-?view=basic' -f $Script:urlVar, $DeviceID
+
+        try {
+
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data
+        }
+        catch {
+
+            Write-Error $_
+        }
+    }
+
+    process {
+
+        while ($nextPageId) {
+
+            $nextPage = '&pageId={0}' -f $nextPageId
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri ($uri + $nextPage) -Headers $Script:wugHeaders
 
             $nextPageId = $continuedResponse.paging.nextPageId
 
@@ -284,13 +342,13 @@ function Get-WUGDeviceGroupAssignment {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -363,13 +421,13 @@ function Get-WUGDeviceAttribute {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -379,6 +437,76 @@ function Get-WUGDeviceAttribute {
         }
 
         $uri = '{0}:9644/api/v1/devices/{1}/attributes/-?names={2}' -f $Script:urlVar, $DeviceID, $AttributeName
+
+        try {
+
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data
+        }
+        catch {
+
+            Write-Error $_
+        }
+    }
+
+    process {
+
+        while ($nextPageId) {
+
+            $uri += '&pageId={0}' -f $nextPageId
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
+}
+
+function Get-WUGDeviceInterface {
+
+    param (
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [string] $DeviceID
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+
+        $uri = '{0}:9644/api/v1/devices/{1}/interfaces/-' -f $Script:urlVar, $DeviceID
 
         try {
 
@@ -437,13 +565,13 @@ function Add-WUGActiveMonitorToDevice {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -480,7 +608,78 @@ function Add-WUGActiveMonitorToDevice {
 
             Write-Error $_
         }
-        
+
+    }
+}
+
+function Add-WUGPerformanceMonitorToDevice {
+
+    param(
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [Parameter(Mandatory)]
+        [string] $DeviceID,
+
+        [Parameter(Mandatory)]
+        [string] $PerformanceMonitorID
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+    }
+
+    process {
+
+        $uri = '{0}:9644/api/v1/devices/{1}/monitors/-' -f $Script:urlVar, $DeviceID
+
+        $requestBody = @(
+            @{
+                type          = 'performance'
+                monitorTypeId = $PerformanceMonitorID
+                enabled       = $true
+                performance   = @{
+                    pollingIntervalMinutes = 10
+                }
+            }
+        )
+
+        $requestBody = $requestBody | ConvertTo-Json
+
+        try {
+
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $Script:wugHeaders -Body $requestBody
+
+            if ($response.data."successful" -eq 1) {
+
+                Write-Log -Message '[INFO] Successfully added monitor to device' -Severty Info -Console
+            }
+        }
+        catch {
+
+            Write-Error $_
+        }
+
     }
 }
 
@@ -510,13 +709,13 @@ function Add-WUGMonitoredDevice {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -578,7 +777,10 @@ function Add-WUGMonitoredDevice {
 
                     Write-Log -Message ('[INFO] New device ID {0}' -f $deviceId) -Severty Info -Console
 
-                    Update-WUGDeviceProperty -WUGServer $WUGServer -Credential $Credential -DeviceID $deviceId -DisplayName $DisplayName
+                    if ($DisplayName) {
+
+                        Update-WUGDeviceProperty -WUGServer $WUGServer -Credential $Credential -DeviceID $deviceId -DisplayName $DisplayName
+                    }
                 }
             }
             catch {
@@ -613,13 +815,13 @@ function Update-WUGDeviceProperty {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -684,13 +886,13 @@ function Get-WUGDeviceRole {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -751,13 +953,13 @@ function Add-WUGDeviceGroup {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -814,13 +1016,13 @@ function Invoke-WUGDeviceMaintenanceMode {
 
     if (!$Script:wugHeaders) {
 
-        Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+        Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
         Get-WUGToken -WUGServer $WUGServer -Credential $Credential
     }
     elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-        Write-Warning -Message 'Token expired, running Connect-WUGServer'
+        Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
         Get-WUGToken -WUGServer $WUGServer -Credential $Credential
     }
@@ -900,13 +1102,13 @@ function Get-WUGDeviceGroupsSummary {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -965,13 +1167,13 @@ function Get-WUGDeviceGroup {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -988,7 +1190,7 @@ function Get-WUGDeviceGroup {
 
             'layer2' { $uri = '{0}:9644/api/v1/device-groups/-?groupType=layer2' -f $Script:urlVar }
 
-            Default { $uri = '{0}:9644/api/v1/device-groups/-' -f $Script:urlVar }
+            default { $uri = '{0}:9644/api/v1/device-groups/-?view=detail' -f $Script:urlVar }
         }
 
         if ($Search) {
@@ -1071,13 +1273,13 @@ function Invoke-WUGDeviceGroupRefresh {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -1155,13 +1357,13 @@ function Add-WUGMonitor {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -1262,13 +1464,13 @@ function Get-WUGMonitor {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
@@ -1342,13 +1544,13 @@ function Get-WUGDeviceGroupUptime {
 
         if (!$Script:wugHeaders) {
 
-            Write-Warning -Message 'Authorization header not set, running Connect-WUGServer'
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
         elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
 
-            Write-Warning -Message 'Token expired, running Connect-WUGServer'
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
 
             Get-WUGToken -WUGServer $WUGServer -Credential $Credential
         }
