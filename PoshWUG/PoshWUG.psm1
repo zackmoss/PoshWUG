@@ -252,6 +252,85 @@ function Get-WUGDevice {
     }
 }
 
+function Get-WUGDeviceConfiguration {
+
+    param (
+
+        [Parameter(Mandatory)]
+        [string] $WUGServer,
+
+        [Parameter(Mandatory)]
+        [pscredential] $Credential,
+
+        [string] $GroupID = '-1',
+
+        [string] $DeviceName
+    )
+
+    begin {
+
+        if (!$Script:wugHeaders) {
+
+            Write-Verbose -Message 'Authorization header not set, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        elseif ((Get-Date) -ge $Script:wugConnection.wugTokenExpiry) {
+
+            Write-Verbose -Message 'Token expired, running Get-WUGToken'
+
+            Get-WUGToken -WUGServer $WUGServer -Credential $Credential
+        }
+        else {
+
+            Request-WUGRefreshToken
+        }
+
+        if ($DeviceName) {
+
+            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-/config/template?search={2}' -f $Script:urlVar, $GroupID, $DeviceName
+        }
+        else {
+
+            $uri = '{0}:9644/api/v1/device-groups/{1}/devices/-/config/template' -f $Script:urlVar, $GroupID
+        }
+
+        try {
+
+            $initialResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $Script:wugHeaders
+
+            $nextPageId = $initialResponse.paging.nextPageId
+
+            $returnObject = @()
+
+            $returnObject += $initialResponse.data.templates
+        }
+        catch {
+
+            Write-Error $_
+        }
+    }
+
+    process {
+
+        while ($nextPageId) {
+
+            $nextPage = '&pageId={0}' -f $nextPageId
+
+            $continuedResponse = Invoke-RestMethod -Method Get -Uri ($uri + $nextPage) -Headers $Script:wugHeaders
+
+            $nextPageId = $continuedResponse.paging.nextPageId
+
+            $returnObject += $continuedResponse.data.templates
+        }
+    }
+
+    end {
+
+        $returnObject
+    }
+}
+
 function Get-WUGDeviceMonitorAssignment {
 
     param (
